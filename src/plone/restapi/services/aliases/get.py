@@ -25,7 +25,9 @@ class Aliases:
         storage = getUtility(IRedirectionStorage)
         context_path = "/".join(self.context.getPhysicalPath())
         redirects = storage.redirects(context_path)
-        aliases = [deroot_path(alias) for alias in redirects]
+        # Ensure output of redirects is a list of strings
+        if isinstance(redirects, list) and all(isinstance(redirect, str) for redirect in redirects):
+            aliases = [deroot_path(redirect) for redirect in redirects]         
         self.request.response.setStatus(201)
         self.request.response.setHeader("Content-Type", "application/json")
         return [{"path": alias} for alias in aliases], len(aliases)
@@ -55,19 +57,29 @@ class Aliases:
         return redirects, items_total
 
     def reply_root_csv(self):
+        # Apply filters before downloading csv
+        start = self.request.form.get("start")
+        end = self.request.form.get("end")
+
         batch = RedirectsControlPanel(self.context, self.request).redirects()
-        redirects = [entry for entry in batch]
+        filtered_redirects = []
 
-        for redirect in redirects:
-            del redirect["redirect"]
-            redirect["datetime"] = datetimelike_to_iso(redirect["datetime"])
+        for redirect in batch:
+            redirect_datetime = redirect.get("datetime")
+            if redirect_datetime:
+                redirect_datetime = redirect_datetime.fromisoformat(redirect_datetime)
+                if start and redirect_datetime < DateTime:
+                    continue
+                if end and redirect_datetime > DateTime:
+                    continue
+            filtered_redirects.append(redirect)
+
         self.request.response.setStatus(201)
-
         self.request.form["b_start"] = "0"
         self.request.form["b_size"] = "1000000"
         self.request.__annotations__.pop("plone.memoize")
 
-        filestream = RedirectsControlPanel(self.context, self.request).download()
+        filestream = RedirectsControlPanel(self.context, self.request).download(filtered_redirects)
         content = filestream.read()
         filestream.close()
 
